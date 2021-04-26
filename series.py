@@ -1,21 +1,31 @@
 from abc import ABC, abstractmethod
 from typing import Union, Iterable, SupportsInt
+from operator import add, pow
 
-# TODO: Implement GenericSeries
+
 # TODO: Implement Finite and InfiniteSeries
 
 
 class Series(ABC):
     def __repr__(self) -> str:
-        # TODO: don't display dots for convergent series
-        # TODO: display type of series
-        return "{}, {}, {}, ...".format(*self[0:3])
+        name = self.__class__.__name__.strip("Series")
+        return "{}: ({}, {}, {}, ...)".format(name, *self[0:3])  # type: ignore
 
-    def __getitem__(self, key: Union[int, slice]) -> None:
+    def __add__(self, other):
+        if type(other) in (float, int):
+            return BinaryOpSeries(self, FixedSeries(other), add)
+        return BinaryOpSeries(self, other, add)
+
+    def __pow__(self, other):
+        if type(other) in (float, int):
+            return BinaryOpSeries(self, FixedSeries(other), pow)
+        return BinaryOpSeries(self, other, pow)
+
+    def __getitem__(self, key):
         if isinstance(key, slice):
             if key.stop is None:
                 raise KeyError("Series slice must specify stop")
-            return self.__slice__(key)
+            return tuple(self.__getith__(i) for i in range(key.start or 0, key.stop, key.step or 1))
 
         if isinstance(key, int):
             return self.__getith__(key)
@@ -24,38 +34,81 @@ class Series(ABC):
         raise TypeError(f"Series indices must be integers or slices, not {t}")
 
     @abstractmethod
-    def __slice__(self, key: slice) -> Iterable:
+    def __getith__(self, key: int):
         pass
 
-    @abstractmethod
-    def __getith__(self, key: int) -> SupportsInt:
-        pass
+
+class BinaryOpSeries(Series):
+    """ Element-wise binary operation on two series """
+
+    def __init__(self, s1, s2, op):
+        self.s1 = s1
+        self.s2 = s2
+        self.op = op
+
+    def __getith__(self, i):
+        return self.op(self.s1[i], self.s2[i])
+
+
+class UniaryOpSeries(Series):
+    def __init__(self, s, op):
+        self.s = s
+        self.op = op
+
+    def __getith__(self, i):
+        return self.op(self.s[i])
+
+
+class DiffSeries(Series):
+    def __init__(self, s):
+        self.s = s
+
+    def __getith__(self, i):
+        return self.s[i + 1] - self.s[i]
+
+
+class AccumSeries(Series):
+    def __init__(self, s):
+        self.s = s
+
+    def __getith__(self, i):
+        return sum(self.s[0:i+1])
+
+
+class FixedSeries(Series):
+    def __init__(self, value):
+        self.value = value
+
+    def __int__(self):
+        return int(self.value)
+
+    def __float__(self):
+        return float(self.value)
+
+    def __getith__(self, i):
+        return self.value
 
 
 class ArithmeticSeries(Series):
-    def __init__(self, a: SupportsInt, d: SupportsInt) -> None:
+    def __init__(self, a, d):
         self._a = a
         self._d = d
 
-    def __add__(self, other: "ArithmeticSeries") -> "ArithmeticSeries":
-        # TODO: support adding numbers
-        return ArithmeticSeries(self._a + other._a, self._d + other._d)
+    def __add__(self, other):
+        if isinstance(other, ArithmeticSeries):
+            return ArithmeticSeries(self._a + other._a, self._d + other._d)
+        return Series.__add__(self, other)
 
-    def __eq__(self, other: "ArithmeticSeries") -> bool:
+    def __eq__(self, other):
         return (self._a == other._a) and (self._d == other._d)
 
-    def __slice__(self, s: slice) -> Iterable:
-        a = self._a
-        d = self._d
-        return range(a + s.start * d, a + s.stop * d, d)
-
-    def __getith__(self, i: int) -> SupportsInt:
+    def __getith__(self, i):
         return self._a + i * self._d
 
     @staticmethod
-    def from_iterable(s: Iterable[SupportsInt], a=None) -> "ArithmeticSeries":
-        """ Try to build an arthimetic series from an iterable of numbers
-        >>> ArithmeticSeries.from_iterable([3, 9, 15, 21]) == ArithmeticSeries(3, 6)
+    def from_series(s):
+        """ Try to build an arthimetic series from a series of numbers
+        >>> ArithmeticSeries.from_series([3, 9, 15, 21]) == ArithmeticSeries(3, 6)
         True
         """
         isconst = True
@@ -72,13 +125,13 @@ class ArithmeticSeries(Series):
             raise ValueError(
                 "Iterable values don't have a constant difference")
 
-        return ArithmeticSeries(a or s[0], d)
+        return ArithmeticSeries(s[0], d)
 
 
 class GeometricSeries(Series):
     """
     >>> GeometricSeries(3, 2)
-    3, 6, 12, ...
+    Geometric: (3, 6, 12, ...)
     >>> GeometricSeries(4, 3)[:]
     Traceback (most recent call last):
         ...
@@ -87,16 +140,14 @@ class GeometricSeries(Series):
     4.0
     """
 
-    def __init__(self, a: SupportsInt, r: SupportsInt) -> None:
+    def __init__(self, a, r):
         self._a = a
         self._r = r
 
-    def __slice__(self, s: slice) -> Iterable:
-        a = self._a
-        r = self._r
-        return (a * (r ** i) for i in range(s.start or 0, s.stop, s.step or 1))
+    def __eq__(self, other):
+        return (self._a == other._a) and (self._r == other._r)
 
-    def __getith__(self, i: int) -> SupportsInt:
+    def __getith__(self, i):
         a = self._a
         r = self._r
         return a * (r ** i)
@@ -105,3 +156,9 @@ class GeometricSeries(Series):
 if __name__ == "__main__":
     import doctest
     doctest.testmod()
+
+    a = GeometricSeries(1, 2)
+    b = ArithmeticSeries(1, 2)
+    c = a + b
+    print(sum((b ** -100)[:10000]))
+    print(AccumSeries(c) + DiffSeries(c))
